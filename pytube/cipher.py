@@ -145,18 +145,9 @@ def get_initial_function_name(js: str) -> str:
     """
 
     function_patterns = [
-        r"\b[cs]\s*&&\s*[adf]\.set\([^,]+\s*,\s*encodeURIComponent\s*\(\s*(?P<sig>[a-zA-Z0-9$]+)\(",  # noqa: E501
-        r"\b[a-zA-Z0-9]+\s*&&\s*[a-zA-Z0-9]+\.set\([^,]+\s*,\s*encodeURIComponent\s*\(\s*(?P<sig>[a-zA-Z0-9$]+)\(",  # noqa: E501
-        r'(?:\b|[^a-zA-Z0-9$])(?P<sig>[a-zA-Z0-9$]{2})\s*=\s*function\(\s*a\s*\)\s*{\s*a\s*=\s*a\.split\(\s*""\s*\)',  # noqa: E501
-        r'(?P<sig>[a-zA-Z0-9$]+)\s*=\s*function\(\s*a\s*\)\s*{\s*a\s*=\s*a\.split\(\s*""\s*\)',  # noqa: E501
-        r'(["\'])signature\1\s*,\s*(?P<sig>[a-zA-Z0-9$]+)\(',
-        r"\.sig\|\|(?P<sig>[a-zA-Z0-9$]+)\(",
-        r"yt\.akamaized\.net/\)\s*\|\|\s*.*?\s*[cs]\s*&&\s*[adf]\.set\([^,]+\s*,\s*(?:encodeURIComponent\s*\()?\s*(?P<sig>[a-zA-Z0-9$]+)\(",  # noqa: E501
-        r"\b[cs]\s*&&\s*[adf]\.set\([^,]+\s*,\s*(?P<sig>[a-zA-Z0-9$]+)\(",  # noqa: E501
-        r"\b[a-zA-Z0-9]+\s*&&\s*[a-zA-Z0-9]+\.set\([^,]+\s*,\s*(?P<sig>[a-zA-Z0-9$]+)\(",  # noqa: E501
-        r"\bc\s*&&\s*a\.set\([^,]+\s*,\s*\([^)]*\)\s*\(\s*(?P<sig>[a-zA-Z0-9$]+)\(",  # noqa: E501
-        r"\bc\s*&&\s*[a-zA-Z0-9]+\.set\([^,]+\s*,\s*\([^)]*\)\s*\(\s*(?P<sig>[a-zA-Z0-9$]+)\(",  # noqa: E501
-        r"\bc\s*&&\s*[a-zA-Z0-9]+\.set\([^,]+\s*,\s*\([^)]*\)\s*\(\s*(?P<sig>[a-zA-Z0-9$]+)\(",  # noqa: E501
+        r'(?P<sig>[a-zA-Z0-9_$]+)\s*=\s*function\(\s*(?P<arg>[a-zA-Z0-9_$]+)\s*\)\s*{\s*(?P=arg)\s*=\s*(?P=arg)\.split\(\s*""\s*\)\s*;\s*[^}]+;\s*return\s+(?P=arg)\.join\(\s*""\s*\)',
+        r'(?:\b|[^a-zA-Z0-9_$])(?P<sig>[a-zA-Z0-9_$]{2,})\s*=\s*function\(\s*a\s*\)\s*{\s*a\s*=\s*a\.split\(\s*""\s*\)(?:;[a-zA-Z0-9_$]{2}\.[a-zA-Z0-9_$]{2}\(a,\d+\))?',
+        r'\b(?P<var>[a-zA-Z0-9_$]+)&&\((?P=var)=(?P<sig>[a-zA-Z0-9_$]{2,})\(decodeURIComponent\((?P=var)\)\)',
     ]
     logger.debug("finding initial function name")
     for pattern in function_patterns:
@@ -262,16 +253,22 @@ def get_throttling_function_name(js: str) -> str:
         The name of the function used to compute the throttling parameter.
     """
     function_patterns = [
-        # https://github.com/ytdl-org/youtube-dl/issues/29326#issuecomment-865985377
-        # https://github.com/yt-dlp/yt-dlp/commit/48416bc4a8f1d5ff07d5977659cb8ece7640dcd8
-        # var Bpa = [iha];
-        # ...
-        # a.C && (b = a.get("n")) && (b = Bpa[0](b), a.set("n", b),
-        # Bpa.length || iha("")) }};
-        # In the above case, `iha` is the relevant function name
-        r'a\.[a-zA-Z]\s*&&\s*\([a-z]\s*=\s*a\.get\("n"\)\)\s*&&\s*'
-        r'\([a-z]\s*=\s*([a-zA-Z0-9$]+)(\[\d+\])?\([a-z]\)',
-        r'\([a-z]\s*=\s*([a-zA-Z0-9$]+)(\[\d+\])\([a-z]\)',
+        r'''(?x)
+            (?:
+                \.get\("n"\)\)&&\(b=|
+                (?:
+                    b=String\.fromCharCode\(110\)|
+                    (?P<str_idx>[a-zA-Z0-9_$.]+)&&\(b="nn"\[\+(?P=str_idx)\]
+                )
+                (?:
+                    ,[a-zA-Z0-9_$]+\(a\))?,c=a\.
+                    (?:
+                        get\(b\)|
+                        [a-zA-Z0-9_$]+\[b\]\|\|null
+                    )\)&&\(c=|
+                \b(?P<var>[a-zA-Z0-9_$]+)=
+            )(?P<nfunc>[a-zA-Z0-9_$]+)(?:\[(?P<idx>\d+)\])?\([a-zA-Z]\)
+            (?(var),[a-zA-Z0-9_$]+\.set\((?:"n+"|[a-zA-Z0-9_$]+)\,(?P=var)\))'''
     ]
     logger.debug('Finding throttling function name')
     for pattern in function_patterns:
@@ -279,23 +276,29 @@ def get_throttling_function_name(js: str) -> str:
         function_match = regex.search(js)
         if function_match:
             logger.debug("finished regex search, matched: %s", pattern)
-            if len(function_match.groups()) == 1:
-                return function_match.group(1)
-            idx = function_match.group(2)
+
+            func = function_match.group('nfunc')
+            idx = function_match.group('idx')
+
+            logger.debug(f'func is: {func}')
+            logger.debug(f'idx is: {idx}')
+
+            logger.debug('Checking throttling function name')
             if idx:
-                idx = idx.strip("[]")
-                array = re.search(
-                    r'var {nfunc}\s*=\s*(\[.+?\]);'.format(
-                        nfunc=re.escape(function_match.group(1))),
-                    js
+                n_func_check_pattern = fr'var {re.escape(func)}\s*=\s*\[(.+?)];'
+                n_func_found = re.search(n_func_check_pattern, js)
+
+                if n_func_found:
+                    throttling_function = n_func_found.group(1)
+                    logger.debug(f'Throttling function name is: {throttling_function}')
+                    return throttling_function
+
+                raise RegexMatchError(
+                    caller="get_throttling_function_name", pattern=f"{n_func_check_pattern} in {js_url}"
                 )
-                if array:
-                    array = array.group(1).strip("[]").split(",")
-                    array = [x.strip() for x in array]
-                    return array[int(idx)]
 
     raise RegexMatchError(
-        caller="get_throttling_function_name", pattern="multiple"
+        caller="get_throttling_function_name", pattern=f"multiple in {js_url}"
     )
 
 
@@ -338,6 +341,8 @@ def get_throttling_function_array(js: str) -> List[Any]:
     array_regex = re.compile(array_start)
     match = array_regex.search(raw_code)
 
+    if match is None:
+        return []
     array_raw = find_object_from_startpoint(raw_code, match.span()[1] - 1)
     str_array = throttling_array_split(array_raw)
 
