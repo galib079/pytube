@@ -252,24 +252,18 @@ def get_throttling_function_name(js: str) -> str:
     :returns:
         The name of the function used to compute the throttling parameter.
     """
-    function_patterns = [
-        r'''(?x)
-            (?:
-                \.get\("n"\)\)&&\(b=|
-                (?:
-                    b=String\.fromCharCode\(110\)|
-                    (?P<str_idx>[a-zA-Z0-9_$.]+)&&\(b="nn"\[\+(?P=str_idx)\]
-                )
-                (?:
-                    ,[a-zA-Z0-9_$]+\(a\))?,c=a\.
-                    (?:
-                        get\(b\)|
-                        [a-zA-Z0-9_$]+\[b\]\|\|null
-                    )\)&&\(c=|
-                \b(?P<var>[a-zA-Z0-9_$]+)=
-            )(?P<nfunc>[a-zA-Z0-9_$]+)(?:\[(?P<idx>\d+)\])?\([a-zA-Z]\)
-            (?(var),[a-zA-Z0-9_$]+\.set\((?:"n+"|[a-zA-Z0-9_$]+)\,(?P=var)\))'''
-    ]
+   function_patterns = [
+    # https://github.com/ytdl-org/youtube-dl/issues/29326#issuecomment-865985377
+    # https://github.com/yt-dlp/yt-dlp/commit/48416bc4a8f1d5ff07d5977659cb8ece7640dcd8
+    # var Bpa = [iha];
+    # ...
+    # a.C && (b = a.get("n")) && (b = Bpa[0](b), a.set("n", b),
+    # Bpa.length || iha("")) }};
+    # In the above case, `iha` is the relevant function name
+    r'a\.[a-zA-Z]\s*&&\s*\([a-z]\s*=\s*a\.get\("n"\)\)\s*&&.*?\|\|\s*([a-z]+)',
+    r'\([a-z]\s*=\s*([a-zA-Z0-9$]+)(\[\d+\])?\([a-z]\)',
+    r'\([a-z]\s*=\s*([a-zA-Z0-9$]+)(\[\d+\])\([a-z]\)',
+]
     logger.debug('Finding throttling function name')
     for pattern in function_patterns:
         regex = re.compile(pattern)
